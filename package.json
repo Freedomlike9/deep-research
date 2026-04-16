@@ -1,0 +1,17 @@
+{
+  "name": "deep-research",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "start": "npm --workspace backend run start",
+    "run": "npm --workspace backend run run",
+    "gateway": "npm --workspace backend run gateway",
+    "frontend:dev": "npm --workspace frontend run dev",
+    "frontend:build": "npm --workspace frontend run build",
+    "verify": "npm --workspace backend run verify"
+  }
+}

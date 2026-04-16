@@ -1,0 +1,35 @@
+{
+  "mcpServers": {
+    "researchMemory": {
+      "enabled": true,
+      "type": "inline",
+      "description": "Reusable research heuristics and reporting constraints",
+      "resources": [
+        {
+          "title": "Research Memory",
+          "content": "Prefer official docs, recent reports, and direct sources. Surface disagreements explicitly. Keep claims cited."
+        }
+      ]
+    }
+  },
+  "skills": {
+    "deep-research": {
+      "enabled": true
+    },
+    "github-deep-research": {
+      "enabled": true
+    },
+    "data-analysis": {
+      "enabled": true
+    },
+    "find-skills": {
+      "enabled": true
+    },
+    "topic-briefing": {
+      "enabled": true
+    },
+    "consulting-analysis": {
+      "enabled": true
+    }
+  }
+}

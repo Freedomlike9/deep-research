@@ -1,0 +1,24 @@
+{
+  "name": "deep-research-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "node --experimental-strip-types src/cli.ts",
+    "run": "node --experimental-strip-types src/cli.ts",
+    "gateway": "node --experimental-strip-types src/app/gateway/app.ts",
+    "verify": "node --experimental-strip-types --eval \"import('./src/index.ts')\""
+  },
+  "dependencies": {
+    "@langchain/core": "^0.3.79",
+    "@langchain/langgraph": "^0.2.36",
+    "@langchain/openai": "^0.3.7",
+    "alasql": "^4.16.0",
+    "dotenv": "^17.2.3",
+    "langchain": "^0.3.37",
+    "p-limit": "^5.0.0",
+    "xlsx": "^0.18.5",
+    "zod": "^3.24.2"
+  }
+}
