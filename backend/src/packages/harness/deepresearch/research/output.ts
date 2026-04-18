@@ -1,7 +1,3 @@
-import fs from "node:fs/promises";
-import path from "node:path";
-import { ensureDir, safeSlug } from "../utils/fs.ts";
-
 export const normalizeReportContent = (content: string, topic: string) => {
   let normalized = content.replace(/\r\n/g, "\n").trim();
 
@@ -20,19 +16,4 @@ export const normalizeReportContent = (content: string, topic: string) => {
   }
 
   return normalized.endsWith("\n") ? normalized : `${normalized}\n`;
-};
-
-export const saveReport = async ({
-  outputDir,
-  topic,
-  content
-}: {
-  outputDir: string;
-  topic: string;
-  content: string;
-}) => {
-  await ensureDir(outputDir);
-  const filePath = path.join(outputDir, `${safeSlug(topic)}.md`);
-  await fs.writeFile(filePath, normalizeReportContent(content, topic), "utf8");
-  return filePath;
 };

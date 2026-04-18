@@ -2,9 +2,10 @@ import { randomUUID } from "node:crypto";
 import { getAppConfig } from "../../config/app-config.ts";
 import { createDryRunModel, type TextGenerationModel } from "../../models/factory.ts";
 import { buildResearchGraph } from "../../research/graph.ts";
-import { normalizeReportContent, saveReport } from "../../research/output.ts";
+import { normalizeReportContent } from "../../research/output.ts";
 import { createSearchClient } from "../../research/search.ts";
 import { emitProgress, type OnProgress } from "../../research/progress.ts";
+import { upsertRecord } from "../../research/db.ts";
 import { buildMcpPromptSection, resolveMcpResources } from "../../mcp/manager.ts";
 import { buildSkillsPromptSection, loadSkills } from "../../skills/loader.ts";
 import {
@@ -161,22 +162,28 @@ export class LeadResearchAgent {
       ...result
     };
 
-    const outputDir = state.threadData?.outputsPath || appConfig.outputDir;
     const report = normalizeReportContent(
       state.report || "研究流程未产出报告，请检查模型与搜索配置是否正确。",
       state.topic
     );
-    const reportPath = await saveReport({
-      outputDir,
-      topic: state.topic,
-      content: report
-    });
-    state.artifacts = [...state.artifacts, reportPath];
+    const reportPath = `sqlite://research_records/${stateId}`;
     state.report = report;
 
     for (const middleware of middlewares) {
       state = mergeState(state, await middleware.afterRun?.(state));
     }
+
+    // 将研究报告与元数据写入 SQLite
+    upsertRecord({
+      threadId: stateId,
+      title: state.title || topic.slice(0, 80),
+      topic,
+      reportPath,
+      reportContent: report,
+      sources: state.sources.length,
+      iterations: state.iteration,
+      createdAt: Date.now()
+    });
 
     return {
       state,

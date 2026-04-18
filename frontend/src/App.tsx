@@ -4,6 +4,7 @@ import { ReportPanel } from "./components/ReportPanel";
 import { WorkspaceHeader } from "./components/WorkspaceHeader";
 import {
   api,
+  type HistoryRecord,
   type ReportChunkPayload,
   streamResearch,
   type McpServerItem,
@@ -48,6 +49,8 @@ export const App = () => {
   const [isTypingReport, setIsTypingReport] = useState(false);
   const [pendingReportText, setPendingReportText] = useState("");
   const [streamedReport, setStreamedReport] = useState("");
+  const [historyRecords, setHistoryRecords] = useState<HistoryRecord[]>([]);
+  const [selectedThreadId, setSelectedThreadId] = useState<string>();
   const visibleReportRef = useRef("");
   const pendingReportRef = useRef("");
 
@@ -58,6 +61,15 @@ export const App = () => {
   useEffect(() => {
     pendingReportRef.current = pendingReportText;
   }, [pendingReportText]);
+
+  const refreshHistory = async () => {
+    try {
+      const historyResponse = await api.listResearchHistory();
+      setHistoryRecords(historyResponse.records);
+    } catch {
+      // 历史加载失败不影响主功能
+    }
+  };
 
   useEffect(() => {
     const load = async () => {
@@ -71,6 +83,7 @@ export const App = () => {
         setMcpServers(mcpResponse.mcpServers);
         if (latestResearch) {
           setThreadId(latestResearch.threadId);
+          setSelectedThreadId(latestResearch.threadId);
           setReportPath(latestResearch.reportPath);
           setReport(latestResearch.report);
           setVisibleReport(latestResearch.report);
@@ -79,6 +92,7 @@ export const App = () => {
       } catch (loadError) {
         setError(loadError instanceof Error ? loadError.message : String(loadError));
       }
+      await refreshHistory();
     };
     void load();
   }, []);
@@ -137,10 +151,51 @@ export const App = () => {
     }
   };
 
+  const handleDeleteHistory = async (id: string) => {
+    try {
+      await api.deleteResearch(id);
+      setHistoryRecords((current) => current.filter((r) => r.threadId !== id));
+      if (id === selectedThreadId) {
+        setSelectedThreadId(undefined);
+        setThreadId(undefined);
+        setTitle(undefined);
+        setReport("");
+        setVisibleReport("");
+        setReportPath(undefined);
+        setStats(undefined);
+        setDebug(undefined);
+      }
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : String(deleteError));
+    }
+  };
+
+  const handleSelectHistory = async (id: string) => {
+    if (loading) return;
+    try {
+      const detail = await api.getResearchByThreadId(id);
+      setThreadId(detail.threadId);
+      setSelectedThreadId(detail.threadId);
+      setTitle(detail.title);
+      setReport(detail.report);
+      setVisibleReport(detail.report);
+      setReportPath(detail.reportPath);
+      setStats(detail.stats);
+      setDebug(undefined);
+      setProgressEvents([]);
+      setActiveStep(undefined);
+      setActiveMessage(undefined);
+      setActiveProgress(undefined);
+    } catch (selectError) {
+      setError(selectError instanceof Error ? selectError.message : String(selectError));
+    }
+  };
+
   const handleSubmit = async () => {
     setLoading(true);
     setError(undefined);
     setThreadId(undefined);
+    setSelectedThreadId(undefined);
     setTitle(`Researching: ${topic}`);
     setReport("");
     setVisibleReport("");
@@ -185,6 +240,7 @@ export const App = () => {
           const result = event.data as StreamDonePayload;
           completed = true;
           setThreadId(result.threadId);
+          setSelectedThreadId(result.threadId);
           setReport(result.report);
           setStreamedReport(result.report);
           setPendingReportText((current) => {
@@ -201,6 +257,8 @@ export const App = () => {
           setDebug(result.debug);
           setActiveMessage("Research complete.");
           setActiveProgress(undefined);
+          // 研究完成后刷新历史列表
+          void refreshHistory();
         }
 
         if (event.type === "error") {
@@ -230,10 +288,14 @@ export const App = () => {
           dryRun={dryRun}
           skills={skills}
           mcpServers={mcpServers}
+          historyRecords={historyRecords}
+          selectedThreadId={selectedThreadId}
           onTopicChange={setTopic}
           onLanguageChange={setLanguage}
           onDryRunChange={setDryRun}
           onToggleSkill={handleToggleSkill}
+          onSelectHistory={handleSelectHistory}
+          onDeleteHistory={handleDeleteHistory}
           onSubmit={handleSubmit}
           loading={loading}
         />

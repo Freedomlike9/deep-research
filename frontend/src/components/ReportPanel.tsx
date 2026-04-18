@@ -265,7 +265,7 @@ export const ReportPanel = ({
         <strong>{title || "No title yet"}</strong>
       </div>
       <div>
-        <span className="meta-label">Artifacts</span>
+        <span className="meta-label">Storage</span>
         <strong>{reportPath || "Not generated"}</strong>
       </div>
       <div>

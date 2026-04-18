@@ -1,7 +1,8 @@
 import http from "node:http";
 import { createChatModel, createDryRunModel } from "../../../packages/harness/deepresearch/models/factory.ts";
 import { LeadResearchAgent } from "../../../packages/harness/deepresearch/agents/lead-agent/agent.ts";
-import { getLatestReport } from "../../../packages/harness/deepresearch/research/history.ts";
+import { getLatestReport, getReportByThreadId } from "../../../packages/harness/deepresearch/research/history.ts";
+import { listRecords, deleteRecord } from "../../../packages/harness/deepresearch/research/db.ts";
 import type { ProgressEvent } from "../../../packages/harness/deepresearch/research/progress.ts";
 
 export const runResearchRoute = async (payload: {
@@ -101,4 +102,28 @@ export const getLatestResearchRoute = async () => {
     return null;
   }
   return latest;
+};
+
+export const getResearchHistoryRoute = ({ page, pageSize }: { page?: number; pageSize?: number }) => {
+  const result = listRecords({ page, pageSize });
+  return {
+    total: result.total,
+    records: result.records.map((record) => ({
+      threadId: record.threadId,
+      title: record.title,
+      topic: record.topic,
+      stats: { sources: record.sources, iterations: record.iterations },
+      createdAt: record.createdAt,
+      reportPath: record.reportPath
+    }))
+  };
+};
+
+export const getResearchByThreadIdRoute = async (threadId: string) => {
+  return getReportByThreadId(threadId);
+};
+
+export const deleteResearchRoute = (threadId: string): { success: boolean } | null => {
+  const deleted = deleteRecord(threadId);
+  return deleted ? { success: true } : null;
 };

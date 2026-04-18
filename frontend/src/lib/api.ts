@@ -58,6 +58,30 @@ export interface ResearchResult {
   debug?: ResearchDebug;
 }
 
+export interface HistoryRecord {
+  threadId: string;
+  title: string;
+  topic: string;
+  stats: { sources: number; iterations: number };
+  createdAt: number; // Unix ms
+  reportPath: string;
+}
+
+export interface ResearchHistoryResponse {
+  total: number;
+  records: HistoryRecord[];
+}
+
+export interface ResearchDetail {
+  threadId: string;
+  title: string;
+  topic: string;
+  report: string;
+  reportPath: string;
+  stats: { sources: number; iterations: number };
+  createdAt: number;
+}
+
 export interface StreamDonePayload extends ResearchResult {}
 
 export interface ReportChunkPayload {
@@ -159,5 +183,11 @@ export const api = {
       reportPath: string;
       report: string;
       title: string;
-    } | null>("/api/research/latest")
+    } | null>("/api/research/latest"),
+  listResearchHistory: (page = 1, pageSize = 20) =>
+    request<ResearchHistoryResponse>(`/api/research/history?page=${page}&pageSize=${pageSize}`),
+  getResearchByThreadId: (threadId: string) =>
+    request<ResearchDetail>(`/api/research/${encodeURIComponent(threadId)}`),
+  deleteResearch: (threadId: string) =>
+    request<{ success: boolean }>(`/api/research/${encodeURIComponent(threadId)}`, { method: "DELETE" })
 };
