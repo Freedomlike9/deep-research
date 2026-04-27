@@ -49,7 +49,7 @@ const buildDefaultConfig = (): AppConfig => ({
     searchTopK: Number.parseInt(process.env.SEARCH_TOP_K || "5", 10),
     searchConcurrency: Number.parseInt(process.env.SEARCH_CONCURRENCY || "3", 10),
     fetchMaxPages: Number.parseInt(process.env.FETCH_MAX_PAGES || "8", 10),
-    maxIterations: Number.parseInt(process.env.RESEARCH_MAX_ITERATIONS || "2", 10),
+    maxIterations: Number.parseInt(process.env.RESEARCH_MAX_ITERATIONS || "1", 10),
     requestTimeoutMs: Number.parseInt(process.env.REQUEST_TIMEOUT_MS || "12000", 10),
     outputLanguage: process.env.OUTPUT_LANGUAGE || "zh-CN"
   },

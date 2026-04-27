@@ -1,18 +1,3 @@
-export interface SkillItem {
-  name: string;
-  description: string;
-  category: string;
-  enabled: boolean;
-}
-
-export interface McpServerItem {
-  enabled: boolean;
-  type: string;
-  description: string;
-  url?: string;
-  resources?: Array<{ title: string; content: string }>;
-}
-
 export interface ResearchDebug {
   usedSkills: Array<{ name: string; description: string }>;
   mcpResources: Array<{ title: string }>;
@@ -63,7 +48,7 @@ export interface HistoryRecord {
   title: string;
   topic: string;
   stats: { sources: number; iterations: number };
-  createdAt: number; // Unix ms
+  createdAt: number;
   reportPath: string;
 }
 
@@ -82,7 +67,16 @@ export interface ResearchDetail {
   createdAt: number;
 }
 
-export interface StreamDonePayload extends ResearchResult {}
+/**
+ * Done payload no longer carries the full `report` text — it was already
+ * streamed via report_chunk events. Only metadata is included.
+ */
+export interface StreamDonePayload {
+  threadId?: string;
+  reportPath?: string;
+  title?: string;
+  stats?: { sources: number; iterations: number };
+}
 
 export interface ReportChunkPayload {
   chunk: string;
@@ -105,10 +99,20 @@ const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
   return (await response.json()) as T;
 };
 
-const parseSSELine = (line: string): ProgressEvent | null => {
-  if (!line.startsWith("data: ")) return null;
+const parseSSEBlock = (block: string): ProgressEvent | null => {
+  // 一个 SSE 块可能有多行 data:（续行），需要全部拼接
+  const dataLines: string[] = [];
+  for (const line of block.split("\n")) {
+    if (line.startsWith("data: ")) {
+      dataLines.push(line.slice(6));
+    } else if (line.startsWith("data:")) {
+      dataLines.push(line.slice(5));
+    }
+    // event: / id: / comment 行忽略，type 从 data JSON 里取
+  }
+  if (!dataLines.length) return null;
   try {
-    return JSON.parse(line.slice(6)) as ProgressEvent;
+    return JSON.parse(dataLines.join("")) as ProgressEvent;
   } catch {
     return null;
   }
@@ -133,50 +137,36 @@ export const streamResearch = async (
   const decoder = new TextDecoder();
   let buffer = "";
 
+  const processBuffer = () => {
+    // 以 \n\n 分割出完整的 SSE 块
+    const parts = buffer.split("\n\n");
+    // 最后一段可能不完整，留在 buffer
+    buffer = parts.pop()!;
+    for (const block of parts) {
+      if (!block.trim()) continue;
+      const event = parseSSEBlock(block);
+      if (event) onEvent(event);
+    }
+  };
+
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
-
-    const parts = buffer.split("\n\n");
-    buffer = parts.pop()!;
-
-    for (const part of parts) {
-      const lines = part.split("\n");
-      for (const line of lines) {
-        const event = parseSSELine(line);
-        if (event) {
-          onEvent(event);
-        }
-      }
-    }
+    processBuffer();
   }
 
-  // Process any remaining buffer
+  // 处理流结束后 buffer 中剩余的内容
+  buffer += decoder.decode();
+  processBuffer();
+  // 以防万一没有 \n\n 结尾
   if (buffer.trim()) {
-    const lines = buffer.split("\n");
-    for (const line of lines) {
-      const event = parseSSELine(line);
-      if (event) {
-        onEvent(event);
-      }
-    }
+    const event = parseSSEBlock(buffer);
+    if (event) onEvent(event);
   }
 };
 
 export const api = {
-  listSkills: () => request<{ skills: SkillItem[] }>("/api/skills"),
-  updateSkill: (skillName: string, enabled: boolean) =>
-    request(`/api/skills/${encodeURIComponent(skillName)}`, {
-      method: "PUT",
-      body: JSON.stringify({ enabled })
-    }),
-  getMcpConfig: () => request<{ mcpServers: Record<string, McpServerItem> }>("/api/mcp/config"),
-  runResearch: (payload: { topic: string; language: string; dryRun: boolean }) =>
-    request<ResearchResult>("/api/research", {
-      method: "POST",
-      body: JSON.stringify(payload)
-    }),
   getLatestResearch: () =>
     request<{
       threadId: string;

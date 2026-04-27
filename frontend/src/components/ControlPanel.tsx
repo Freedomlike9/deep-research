@@ -1,23 +1,24 @@
 import { useState } from "react";
-import type { HistoryRecord, McpServerItem, SkillItem } from "../lib/api";
+import type { HistoryRecord } from "../lib/api";
 
 interface ControlPanelProps {
   topic: string;
   language: string;
-  dryRun: boolean;
-  skills: SkillItem[];
-  mcpServers: Record<string, McpServerItem>;
   historyRecords: HistoryRecord[];
   selectedThreadId?: string;
   onTopicChange(value: string): void;
   onLanguageChange(value: string): void;
-  onDryRunChange(value: boolean): void;
-  onToggleSkill(skillName: string, enabled: boolean): void;
   onSelectHistory(threadId: string): void;
   onDeleteHistory(threadId: string): void;
   onSubmit(): void;
   loading: boolean;
 }
+
+const LANGUAGE_OPTIONS = [
+  { value: "zh-CN", label: "中文" },
+  { value: "en", label: "English" },
+  { value: "ja", label: "日本語" },
+] as const;
 
 const formatDate = (ms: number) =>
   new Date(ms).toLocaleDateString([], {
@@ -30,15 +31,10 @@ const formatDate = (ms: number) =>
 export const ControlPanel = ({
   topic,
   language,
-  dryRun,
-  skills,
-  mcpServers,
   historyRecords,
   selectedThreadId,
   onTopicChange,
   onLanguageChange,
-  onDryRunChange,
-  onToggleSkill,
   onSelectHistory,
   onDeleteHistory,
   onSubmit,
@@ -46,11 +42,17 @@ export const ControlPanel = ({
 }: ControlPanelProps) => {
   const [historyOpen, setHistoryOpen] = useState(true);
 
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && !loading && topic.trim()) {
+      event.preventDefault();
+      onSubmit();
+    }
+  };
+
   return (
     <section className="panel control-panel">
       <div className="panel-header">
         <h2>Research Setup</h2>
-        <p>Configure the lead agent, then run a report generation cycle.</p>
       </div>
 
       <label className="field">
@@ -58,52 +60,33 @@ export const ControlPanel = ({
         <textarea
           value={topic}
           onChange={(event) => onTopicChange(event.target.value)}
-          placeholder="Research LangGraph-based open source deep research frameworks"
+          onKeyDown={handleKeyDown}
+          placeholder="输入你想深入研究的主题..."
         />
       </label>
 
-      <div className="field-row">
-        <label className="field">
-          <span>Language</span>
-          <input value={language} onChange={(event) => onLanguageChange(event.target.value)} />
-        </label>
-
-        <label className="toggle">
-          <input type="checkbox" checked={dryRun} onChange={(event) => onDryRunChange(event.target.checked)} />
-          <span>Dry Run</span>
-        </label>
-      </div>
-
-      <div className="subsection">
-        <h3>Enabled Skills</h3>
-        <div className="token-list">
-          {skills.map((skill) => (
-            <label key={skill.name} className={`token ${skill.enabled ? "active" : ""}`}>
-              <input
-                type="checkbox"
-                checked={skill.enabled}
-                onChange={(event) => onToggleSkill(skill.name, event.target.checked)}
-              />
-              <span>{skill.name}</span>
-            </label>
+      <div className="field">
+        <span>Language</span>
+        <div className="language-select">
+          {LANGUAGE_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              className={`language-option ${language === option.value ? "active" : ""}`}
+              onClick={() => onLanguageChange(option.value)}
+              type="button"
+            >
+              {option.label}
+            </button>
           ))}
         </div>
       </div>
 
-      <div className="subsection">
-        <h3>MCP Context</h3>
-        <ul className="server-list">
-          {Object.entries(mcpServers).map(([name, server]) => (
-            <li key={name}>
-              <strong>{name}</strong>
-              <span>{server.description}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
+      <button className="primary-button" onClick={onSubmit} disabled={loading || !topic.trim()}>
+        {loading ? "Researching..." : "Run Deep Research"}
+      </button>
 
       {historyRecords.length > 0 && (
-        <div className="subsection">
+        <div className="subsection history-section">
           <button
             className="history-toggle"
             onClick={() => setHistoryOpen((prev) => !prev)}
@@ -123,7 +106,10 @@ export const ControlPanel = ({
                   title={record.topic}
                 >
                   <span className="history-title">{record.title}</span>
-                  <span className="history-date">{formatDate(record.createdAt)}</span>
+                  <span className="history-meta-row">
+                    <span className="history-date">{formatDate(record.createdAt)}</span>
+                    <span className="history-stats">{record.stats.sources} sources</span>
+                  </span>
                   <button
                     className="history-delete-btn"
                     onClick={(e) => {
@@ -143,10 +129,6 @@ export const ControlPanel = ({
           )}
         </div>
       )}
-
-      <button className="primary-button" onClick={onSubmit} disabled={loading || !topic.trim()}>
-        {loading ? "Researching..." : "Run Deep Research"}
-      </button>
     </section>
   );
 };

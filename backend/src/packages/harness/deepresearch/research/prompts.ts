@@ -24,7 +24,7 @@ export const buildAnalysisPrompt = ({
   topic: string;
   language: string;
   sources: string;
-}) => `基于以下资料整理研究笔记，每条结论携带引用[citation:标题](URL)。
+}) => `基于以下资料整理研究笔记，每条结论携带引用，格式为标准 Markdown 链接 [标题](URL)。
 主题：${topic}
 语言：${language}
 资料：
@@ -35,15 +35,33 @@ export const buildQualityCheckPrompt = ({
   topic,
   language,
   notes,
+  iteration,
+  maxIterations,
+  sourceCount,
   formatInstructions
 }: {
   topic: string;
   language: string;
   notes: string;
+  iteration: number;
+  maxIterations: number;
+  sourceCount: number;
   formatInstructions: string;
-}) => `判断研究是否完整。如关键数据/案例/趋势缺失则needsMore为true并给2-3条新查询。
+}) => `你是研究质量审核员。请判断当前研究笔记是否已经足够撰写一份高质量报告。
+
 主题：${topic}
 语言：${language}
+当前轮次：第 ${iteration + 1} 轮（最多 ${maxIterations} 轮补充）
+已收集来源数：${sourceCount}
+
+判断标准（满足任一即可认为"完整"）：
+1. 主题的核心概念、关键数据、主要案例已有覆盖
+2. 至少有 3 个不同角度的信息来源
+3. 已有笔记能支撑"执行摘要 + 关键发现 + 案例数据 + 风险局限"四个章节
+
+仅当存在 **明显的、具体的信息缺口**（例如完全缺少某个关键维度的数据）时，才设 needsMore 为 true，并给出 1-2 条精确的补充查询。
+不要因为"还可以更深入"就要求补充——边际收益递减时应停止。
+
 已有笔记：
 ${notes}
 ${formatInstructions}`;
@@ -65,8 +83,11 @@ export const buildReportPrompt = ({
 - 仅输出纯 Markdown，不要包裹在 \`\`\`markdown 代码块中。
 - 标题层级清晰，一级标题只保留 1 个。
 - 保持正式、易读、适合分享的研究报告风格，不要写成零散笔记。
-- 每条事实性结论尽量附带引用，引用格式统一为 [标题](URL)。
+- 每条事实性结论尽量附带引用，引用格式统一为标准 Markdown 链接 [标题](URL)，不要使用 [citation:...] 等自创格式。
+- 所有链接必须使用 [显示文字](URL) 格式，不要直接暴露裸 URL。
 - 优先使用短段落、项目列表、对比表格，让报告有明显的信息分层。
+- 正文段落与"来源清单"之间必须用空行隔开；每个章节（## 标题）前后各空一行。
+- 来源清单中每条来源独占一行，格式为 \`- [标题](URL)\`。
 - 如果资料不足，不要编造；直接说明信息缺口。
 
 请尽量遵循以下结构：
@@ -95,7 +116,8 @@ export const buildReportPrompt = ({
 - 中期观察
 
 ## 来源清单
-- 按来源列出标题与链接
+- 每条来源格式：\`- [标题](URL)\`
+- 不要暴露裸 URL，所有链接都使用 Markdown 超链接
 
 主题：${topic}
 语言：${language}

@@ -58,6 +58,28 @@ export const runResearchStreamRoute = async (
     response.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
   };
 
+  /**
+   * Send the final event and wait for the write buffer to drain before
+   * closing the response. This prevents the "stream ended before the
+   * final result was delivered" error caused by response.end() racing
+   * ahead of an unflushed large done-event payload.
+   */
+  const sendFinalEvent = (event: ProgressEvent): Promise<void> => {
+    return new Promise<void>((resolve) => {
+      if (response.destroyed) {
+        resolve();
+        return;
+      }
+      const payload = `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
+      const flushed = response.write(payload);
+      if (flushed) {
+        resolve();
+      } else {
+        response.once("drain", resolve);
+      }
+    });
+  };
+
   try {
     const agent = new LeadResearchAgent({
       model: payload.dryRun ? createDryRunModel() : createChatModel(),
@@ -70,16 +92,18 @@ export const runResearchStreamRoute = async (
       onProgress: sendEvent
     });
 
-    sendEvent({
+    // Done event carries only metadata — the full report text was already
+    // streamed via report_chunk events. Removing `report` from the payload
+    // shrinks the done event from potentially 30-100 KB to < 1 KB, which
+    // eliminates buffer-flush race conditions.
+    await sendFinalEvent({
       type: "done",
       message: "研究完成",
       data: {
         threadId: result.state.threadId,
         reportPath: result.reportPath,
-        report: result.state.report,
         title: result.state.title,
-        stats: result.stats,
-        debug: result.state.debug
+        stats: result.stats
       },
       timestamp: Date.now()
     });

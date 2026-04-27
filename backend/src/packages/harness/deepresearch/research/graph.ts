@@ -4,6 +4,7 @@ import { StructuredOutputParser } from "langchain/output_parsers";
 import { z } from "zod";
 import { buildAnalysisPrompt, buildPlanPrompt, buildQualityCheckPrompt, buildReportPrompt } from "./prompts.ts";
 import { fetchPageText } from "./web-fetch.ts";
+import { sanitizeText, sanitizeSnippet } from "./sanitize.ts";
 import { runSearchQuery, type SearchClient, type SearchResultItem } from "./search.ts";
 import type { ResearchConfig } from "../config/types.ts";
 import { emitProgress, type OnProgress } from "./progress.ts";
@@ -68,20 +69,20 @@ const uniqueStrings = (items: string[]) =>
   Array.from(new Set(items.filter(Boolean)));
 
 /**
- * OPTIMIZATION: Serialize sources compactly. Only include content for sources
- * that have it, and truncate to keep token budget reasonable.
+ * Serialize sources for LLM consumption.
+ * Content and snippets are sanitized to reduce noise and avoid content-safety triggers.
  */
 const serializeSources = (sources: SearchResultItem[]) =>
   sources
-    .map(
-      (item) =>
-        `标题：${item.title}\nURL：${item.url}\n摘要：${item.snippet}${item.content ? `\n正文：${item.content}` : ""}`
-    )
+    .map((item) => {
+      const snippet = sanitizeSnippet(item.snippet, 400);
+      const content = item.content ? sanitizeText(item.content, 4000) : "";
+      return `标题：${item.title}\nURL：${item.url}\n摘要：${snippet}${content ? `\n正文：${content}` : ""}`;
+    })
     .join("\n\n");
 
 /**
- * OPTIMIZATION: Build a lightweight source index (title + URL only) for the report step.
- * The report step relies on notes (which contain citations) rather than raw source text.
+ * Build a lightweight source index (title + URL only) for the report step.
  */
 const buildSourceIndex = (sources: SearchResultItem[]) =>
   sources
@@ -104,18 +105,16 @@ const routeAfterSearch = (config: ResearchConfig) => () =>
   config.fetchMaxPages > 0 ? "fetch_step" : "analyze_step";
 
 const routeAfterAnalyze = (config: ResearchConfig) => () =>
-  config.maxIterations > 1 ? "quality_step" : "report_step";
+  config.maxIterations >= 1 ? "quality_step" : "report_step";
 
 const routeAfterQuality = (state: typeof ResearchStateAnnotation.State) =>
   state.needsMore ? "search_step" : "report_step";
 
 /**
- * OPTIMIZATION: Cap the number of sources sent to LLM to avoid blowing up context.
- * Prioritize sources that have fetched content, then by recency in results.
+ * Cap the number of sources sent to LLM to avoid blowing up context.
  */
 const selectTopSources = (sources: SearchResultItem[], maxCount: number): SearchResultItem[] => {
   if (sources.length <= maxCount) return sources;
-  // Prioritize sources with content
   const withContent = sources.filter((s) => s.content);
   const withoutContent = sources.filter((s) => !s.content);
   const selected = [...withContent.slice(0, maxCount)];
@@ -127,6 +126,62 @@ const selectTopSources = (sources: SearchResultItem[], maxCount: number): Search
 
 /** Max sources to send per analyze call */
 const ANALYZE_MAX_SOURCES = 15;
+
+/**
+ * Safely invoke the LLM with content-safety error handling.
+ * - Content-safety rejections (400 "high risk") → throw descriptive error (not retryable)
+ * - Rate limits (429) / transient errors (5xx) → retry with backoff
+ * - Other errors → throw immediately
+ */
+const safeModelInvoke = async (
+  model: TextGenerationModel,
+  prompt: string,
+  options: { retries?: number; label?: string } = {}
+): Promise<{ content: string | unknown }> => {
+  const { retries = 2, label = "LLM" } = options;
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await model.invoke(prompt);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+
+      // Content-safety rejection — not retryable
+      if (
+        message.includes("high risk") ||
+        message.includes("content_filter") ||
+        message.includes("content management policy") ||
+        (message.includes("400") && message.toLowerCase().includes("risk"))
+      ) {
+        throw new Error(
+          `[${label}] 内容安全拦截：请求被 LLM API 拒绝。` +
+          `可能是研究主题或抓取的网页内容触发了风控策略。` +
+          `建议：调整研究主题描述，或检查来源内容。`
+        );
+      }
+
+      // Retryable errors: rate limit, server errors, timeouts
+      const isRetryable =
+        message.includes("429") ||
+        message.includes("rate") ||
+        message.includes("503") ||
+        message.includes("502") ||
+        message.includes("timeout") ||
+        message.includes("ECONNRESET") ||
+        message.includes("ETIMEDOUT");
+
+      if (isRetryable && attempt < retries) {
+        const delay = 1000 * (attempt + 1) + Math.random() * 500;
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+
+      throw err;
+    }
+  }
+
+  throw new Error("Unreachable");
+};
 
 export const buildResearchGraph = ({
   model,
@@ -175,8 +230,8 @@ export const buildResearchGraph = ({
       language: state.language,
       formatInstructions: planParser.getFormatInstructions()
     });
-    const response = await model.invoke(prompt);
-    const plan = await planParser.parse(response.content);
+    const response = await safeModelInvoke(model, prompt, { label: "plan" });
+    const plan = await planParser.parse(extractTextContent(response.content));
     emitProgress(onProgress, {
       type: "step_complete",
       step: "plan",
@@ -277,17 +332,11 @@ export const buildResearchGraph = ({
     };
   };
 
-  /**
-   * OPTIMIZATION: Incremental analysis.
-   * - Round 1: analyze all sources (capped at ANALYZE_MAX_SOURCES).
-   * - Round 2+: only analyze NEW sources not yet analyzed, then merge notes.
-   */
   const analyzeNode = async (state: ResearchState) => {
     const allSources = state.sources || [];
     const analyzedSet = new Set(state.analyzedUrls || []);
     const isFirstRound = analyzedSet.size === 0;
 
-    // Filter to only new sources for incremental rounds
     const candidateSources = isFirstRound
       ? allSources
       : allSources.filter((s) => !analyzedSet.has(s.url));
@@ -301,7 +350,6 @@ export const buildResearchGraph = ({
     });
 
     if (toAnalyze.length === 0) {
-      // No new sources to analyze
       return {
         notes: state.notes,
         analyzedUrls: [...analyzedSet],
@@ -314,14 +362,12 @@ export const buildResearchGraph = ({
       language: state.language,
       sources: serializeSources(toAnalyze)
     });
-    const response = await model.invoke(prompt);
+    const response = await safeModelInvoke(model, prompt, { label: "analyze" });
 
-    // Merge notes: append new findings to existing notes
     const mergedNotes = state.notes
-      ? `${state.notes}\n\n${isFirstRound ? "--- 研究分析 ---" : "--- 补充研究 ---"}\n${response.content}`
-      : response.content;
+      ? `${state.notes}\n\n${isFirstRound ? "--- 研究分析 ---" : "--- 补充研究 ---"}\n${extractTextContent(response.content)}`
+      : extractTextContent(response.content);
 
-    // Track which URLs have been analyzed
     const newAnalyzedUrls = [
       ...analyzedSet,
       ...toAnalyze.map((s) => s.url)
@@ -349,10 +395,21 @@ export const buildResearchGraph = ({
       topic: state.topic,
       language: state.language,
       notes: state.notes,
+      iteration: state.iteration,
+      maxIterations: config.maxIterations,
+      sourceCount: (state.sources || []).length,
       formatInstructions: qualityParser.getFormatInstructions()
     });
-    const response = await model.invoke(prompt);
-    const parsed = await qualityParser.parse(response.content);
+    const response = await safeModelInvoke(model, prompt, { label: "quality" });
+
+    let parsed: { needsMore: boolean; newQueries: string[] };
+    try {
+      parsed = await qualityParser.parse(extractTextContent(response.content));
+    } catch {
+      // JSON parse failure — safe fallback: stop iterating
+      parsed = { needsMore: false, newQueries: [] };
+    }
+
     const needsMore = parsed.needsMore && state.iteration < config.maxIterations;
     if (needsMore) {
       emitProgress(onProgress, {
@@ -375,10 +432,6 @@ export const buildResearchGraph = ({
     };
   };
 
-  /**
-   * OPTIMIZATION: Report step now uses notes as primary input + lightweight source index.
-   * Raw source content is NOT re-sent — all key information is already in notes.
-   */
   const reportNode = async (state: ResearchState) => {
     emitProgress(onProgress, {
       type: "step_start",
@@ -415,8 +468,8 @@ export const buildResearchGraph = ({
     }
 
     if (!report) {
-      const response = await model.invoke(prompt);
-      report = response.content;
+      const response = await safeModelInvoke(model, prompt, { label: "report" });
+      report = extractTextContent(response.content);
       emitProgress(onProgress, {
         type: "report_chunk",
         step: "report",
