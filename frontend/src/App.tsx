@@ -1,11 +1,15 @@
 import { startTransition, useEffect, useRef, useState } from "react";
 import { ControlPanel } from "./components/ControlPanel";
+import { FindingsPanel } from "./components/FindingsPanel";
 import { ReportPanel } from "./components/ReportPanel";
+import { SourcePanel } from "./components/SourcePanel";
 import { WorkspaceHeader } from "./components/WorkspaceHeader";
 import {
   api,
   type HistoryRecord,
   type ReportChunkPayload,
+  type ResearchFinding,
+  type ResearchSource,
   streamResearch,
   type ProgressEvent,
   type ResearchStep,
@@ -42,6 +46,8 @@ export const App = () => {
   const [streamedReport, setStreamedReport] = useState("");
   const [historyRecords, setHistoryRecords] = useState<HistoryRecord[]>([]);
   const [selectedThreadId, setSelectedThreadId] = useState<string>();
+  const [findings, setFindings] = useState<ResearchFinding[]>([]);
+  const [sourcesDetail, setSourcesDetail] = useState<ResearchSource[]>([]);
   const visibleReportRef = useRef("");
   const pendingReportRef = useRef("");
   const streamedReportRef = useRef("");
@@ -76,6 +82,8 @@ export const App = () => {
           setReport(latestResearch.report);
           setVisibleReport(latestResearch.report);
           setTitle(latestResearch.title);
+          setFindings(latestResearch.findings || []);
+          setSourcesDetail(latestResearch.sourcesDetail || []);
         }
       } catch (loadError) {
         setError(loadError instanceof Error ? loadError.message : String(loadError));
@@ -134,6 +142,8 @@ export const App = () => {
         setReport("");
         setVisibleReport("");
         setStats(undefined);
+        setFindings([]);
+        setSourcesDetail([]);
       }
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : String(deleteError));
@@ -149,6 +159,8 @@ export const App = () => {
       setReport(detail.report);
       setVisibleReport(detail.report);
       setStats(detail.stats);
+      setFindings(detail.findings || []);
+      setSourcesDetail(detail.sourcesDetail || []);
       setProgressEvents([]);
       setActiveStep(undefined);
       setActiveMessage(undefined);
@@ -172,6 +184,8 @@ export const App = () => {
     pendingReportRef.current = "";
     streamedReportRef.current = "";
     setStats(undefined);
+    setFindings([]);
+    setSourcesDetail([]);
     setProgressEvents([]);
     setActiveStep(undefined);
     setActiveMessage("Connecting to the research stream...");
@@ -207,19 +221,21 @@ export const App = () => {
           setActiveMessage("Research complete.");
           setActiveProgress(undefined);
 
-          // Use the accumulated streamedReport as the authoritative report
-          // text. The done event no longer carries the full report — it was
-          // already delivered via report_chunk events.
           const finalReport = streamedReportRef.current;
           setReport(finalReport);
 
-          // If there is any unseen text that the typewriter hasn't queued yet,
-          // push it into the pending buffer so nothing is lost.
           const alreadyBuffered = visibleReportRef.current.length + pendingReportRef.current.length;
           if (finalReport.length > alreadyBuffered) {
             setPendingReportText((current) => current + finalReport.slice(alreadyBuffered));
           }
           setIsTypingReport(true);
+
+          if (result.threadId) {
+            void api.getResearchByThreadId(result.threadId).then((detail) => {
+              setFindings(detail.findings || []);
+              setSourcesDetail(detail.sourcesDetail || []);
+            });
+          }
 
           void refreshHistory();
         }
@@ -257,18 +273,22 @@ export const App = () => {
           onSubmit={handleSubmit}
           loading={loading}
         />
-        <ReportPanel
-          title={title}
-          report={visibleReport}
-          stats={stats}
-          loading={loading}
-          isTyping={isTypingReport}
-          error={error}
-          progressEvents={progressEvents}
-          activeStepLabel={activeStep ? STEP_LABELS[activeStep] : undefined}
-          activeMessage={activeMessage}
-          activeProgress={activeProgress}
-        />
+        <div className="report-stack">
+          <ReportPanel
+            title={title}
+            report={visibleReport}
+            stats={stats}
+            loading={loading}
+            isTyping={isTypingReport}
+            error={error}
+            progressEvents={progressEvents}
+            activeStepLabel={activeStep ? STEP_LABELS[activeStep] : undefined}
+            activeMessage={activeMessage}
+            activeProgress={activeProgress}
+          />
+          <FindingsPanel findings={findings} />
+          <SourcePanel sources={sourcesDetail} />
+        </div>
       </div>
     </main>
   );

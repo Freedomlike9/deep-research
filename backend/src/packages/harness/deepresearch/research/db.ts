@@ -17,6 +17,8 @@ export interface ResearchRecord {
   reportContent: string;
   sources: number;
   iterations: number;
+  findingsJson: string;
+  sourcesJson: string;
   createdAt: number; // Unix ms
 }
 
@@ -39,6 +41,8 @@ const ensureSchema = (database: DatabaseSync) => {
       report_content TEXT NOT NULL DEFAULT '',
       sources INTEGER NOT NULL DEFAULT 0,
       iterations INTEGER NOT NULL DEFAULT 0,
+      findings_json TEXT NOT NULL DEFAULT '[]',
+      sources_json TEXT NOT NULL DEFAULT '[]',
       created_at INTEGER NOT NULL
     );
 
@@ -48,6 +52,12 @@ const ensureSchema = (database: DatabaseSync) => {
 };
 
 const normalizeStoredPaths = (database: DatabaseSync) => {
+  database.exec(`
+    ALTER TABLE research_records ADD COLUMN findings_json TEXT NOT NULL DEFAULT '[]';
+  `);
+  database.exec(`
+    ALTER TABLE research_records ADD COLUMN sources_json TEXT NOT NULL DEFAULT '[]';
+  `);
   database.exec(`
     UPDATE research_records
     SET report_path = 'sqlite://research_records/' || thread_id
@@ -63,6 +73,8 @@ const rowToRecord = (row: Record<string, unknown>): ResearchRecord => ({
   reportContent: String(row.report_content ?? ""),
   sources: Number(row.sources),
   iterations: Number(row.iterations),
+  findingsJson: String(row.findings_json ?? "[]"),
+  sourcesJson: String(row.sources_json ?? "[]"),
   createdAt: Number(row.created_at)
 });
 
@@ -81,8 +93,8 @@ export const upsertRecord = (record: ResearchRecord): void => {
   getDb()
     .prepare(`
       INSERT INTO research_records (
-        thread_id, title, topic, report_path, report_content, sources, iterations, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        thread_id, title, topic, report_path, report_content, sources, iterations, findings_json, sources_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(thread_id) DO UPDATE SET
         title = excluded.title,
         topic = excluded.topic,
@@ -90,6 +102,8 @@ export const upsertRecord = (record: ResearchRecord): void => {
         report_content = excluded.report_content,
         sources = excluded.sources,
         iterations = excluded.iterations,
+        findings_json = excluded.findings_json,
+        sources_json = excluded.sources_json,
         created_at = excluded.created_at
     `)
     .run(
@@ -100,6 +114,8 @@ export const upsertRecord = (record: ResearchRecord): void => {
       record.reportContent,
       record.sources,
       record.iterations,
+      record.findingsJson,
+      record.sourcesJson,
       record.createdAt
     );
 };
@@ -118,7 +134,7 @@ export const listRecords = ({
   const offset = (page - 1) * pageSize;
   const rows = database
     .prepare(`
-      SELECT thread_id, title, topic, report_path, report_content, sources, iterations, created_at
+      SELECT thread_id, title, topic, report_path, report_content, sources, iterations, findings_json, sources_json, created_at
       FROM research_records
       ORDER BY created_at DESC
       LIMIT ? OFFSET ?
@@ -134,7 +150,7 @@ export const listRecords = ({
 export const getRecord = (threadId: string): ResearchRecord | null => {
   const row = getDb()
     .prepare(`
-      SELECT thread_id, title, topic, report_path, report_content, sources, iterations, created_at
+      SELECT thread_id, title, topic, report_path, report_content, sources, iterations, findings_json, sources_json, created_at
       FROM research_records
       WHERE thread_id = ?
     `)
@@ -145,7 +161,7 @@ export const getRecord = (threadId: string): ResearchRecord | null => {
 export const getLatestRecord = (): ResearchRecord | null => {
   const row = getDb()
     .prepare(`
-      SELECT thread_id, title, topic, report_path, report_content, sources, iterations, created_at
+      SELECT thread_id, title, topic, report_path, report_content, sources, iterations, findings_json, sources_json, created_at
       FROM research_records
       ORDER BY created_at DESC
       LIMIT 1

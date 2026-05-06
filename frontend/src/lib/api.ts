@@ -3,6 +3,34 @@ export interface ResearchDebug {
   mcpResources: Array<{ title: string }>;
 }
 
+export interface ResearchSource {
+  id: string;
+  title: string;
+  url: string;
+  domain: string;
+  snippet: string;
+  content?: string;
+  fetchStatus: "raw" | "fetched" | "failed" | "skipped";
+  score: {
+    authority: number;
+    relevance: number;
+    completeness: number;
+    total: number;
+  };
+}
+
+export interface ResearchFinding {
+  claim: string;
+  confidence: "low" | "medium" | "high";
+  evidence: Array<{
+    sourceId: string;
+    title: string;
+    url: string;
+    summary: string;
+  }>;
+  missingEvidence?: string[];
+}
+
 export type ProgressEventType =
   | "step_start"
   | "step_complete"
@@ -40,6 +68,8 @@ export interface ResearchResult {
   report: string;
   title?: string;
   stats: { sources: number; iterations: number };
+  findings?: ResearchFinding[];
+  sourcesDetail?: ResearchSource[];
   debug?: ResearchDebug;
 }
 
@@ -64,6 +94,8 @@ export interface ResearchDetail {
   report: string;
   reportPath: string;
   stats: { sources: number; iterations: number };
+  findings?: ResearchFinding[];
+  sourcesDetail?: ResearchSource[];
   createdAt: number;
 }
 

@@ -150,6 +150,7 @@ export class LeadResearchAgent {
       queries: state.queries,
       searchResults: state.searchResults,
       sources: state.sources,
+      findings: state.findings,
       notes: state.notes,
       needsMore: state.needsMore,
       report: state.report,
@@ -182,6 +183,8 @@ export class LeadResearchAgent {
       reportContent: report,
       sources: state.sources.length,
       iterations: state.iteration,
+      findingsJson: JSON.stringify(state.findings || []),
+      sourcesJson: JSON.stringify(state.sources || []),
       createdAt: Date.now()
     });
 

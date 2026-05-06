@@ -27,6 +27,8 @@ export const runResearchRoute = async (payload: {
     report: result.state.report,
     title: result.state.title,
     stats: result.stats,
+    findings: result.state.findings,
+    sourcesDetail: result.state.sources,
     debug: result.state.debug
   };
 };

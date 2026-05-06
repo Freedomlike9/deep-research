@@ -4,6 +4,8 @@ export interface ThreadDataState {
   outputsPath?: string;
 }
 
+import type { ResearchFinding, ResearchSource } from "../research/types.ts";
+
 export interface ThreadState {
   threadId: string;
   topic: string;
@@ -25,20 +27,10 @@ export interface ThreadState {
   queries: string[];
   searchResults: Array<{
     query: string;
-    results: Array<{
-      title: string;
-      url: string;
-      snippet: string;
-      content?: string;
-      query?: string;
-    }>;
+    results: ResearchSource[];
   }>;
-  sources: Array<{
-    title: string;
-    url: string;
-    snippet: string;
-    content?: string;
-  }>;
+  sources: ResearchSource[];
+  findings: ResearchFinding[];
   notes: string;
   needsMore: boolean;
   report: string;
@@ -68,6 +60,7 @@ export const createInitialThreadState = ({
   queries: [],
   searchResults: [],
   sources: [],
+  findings: [],
   notes: "",
   needsMore: false,
   report: "",

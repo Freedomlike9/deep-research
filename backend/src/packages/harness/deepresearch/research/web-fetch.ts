@@ -1,11 +1,15 @@
 import { sanitizeText } from "./sanitize.ts";
 
-/**
- * Fetch a web page and extract clean text content.
- *
- * Pipeline: fetch HTML → strip tags/noise → sanitize → truncate.
- */
-export const fetchPageText = async (url: string, timeoutMs: number): Promise<string> => {
+export interface FetchPageResult {
+  content: string;
+  contentType?: string;
+  finalUrl: string;
+  fetchStatus: "fetched" | "failed" | "skipped";
+  extractionMethod?: "html";
+  fetchedAt?: number;
+}
+
+export const fetchPageText = async (url: string, timeoutMs: number): Promise<FetchPageResult> => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -27,7 +31,12 @@ export const fetchPageText = async (url: string, timeoutMs: number): Promise<str
       !contentType.includes("text/plain") &&
       !contentType.includes("application/xhtml")
     ) {
-      return "";
+      return {
+        content: "",
+        contentType,
+        finalUrl: response.url || url,
+        fetchStatus: "skipped"
+      };
     }
 
     const html = await response.text();
@@ -61,9 +70,20 @@ export const fetchPageText = async (url: string, timeoutMs: number): Promise<str
       .replace(/&\w+;/g, " ");
 
     // Sanitize and truncate
-    return sanitizeText(text, 6000);
+    return {
+      content: sanitizeText(text, 6000),
+      contentType,
+      finalUrl: response.url || url,
+      fetchStatus: "fetched",
+      extractionMethod: "html",
+      fetchedAt: Date.now()
+    };
   } catch {
-    return "";
+    return {
+      content: "",
+      finalUrl: url,
+      fetchStatus: "failed"
+    };
   } finally {
     clearTimeout(timer);
   }

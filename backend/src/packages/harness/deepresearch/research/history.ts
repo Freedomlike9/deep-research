@@ -5,6 +5,8 @@ interface LatestReportResult {
   reportPath: string;
   report: string;
   title: string;
+  findings?: unknown[];
+  sourcesDetail?: unknown[];
 }
 
 export const getLatestReport = async (): Promise<LatestReportResult | null> => {
@@ -15,7 +17,9 @@ export const getLatestReport = async (): Promise<LatestReportResult | null> => {
     threadId: record.threadId,
     reportPath: record.reportPath,
     report: record.reportContent,
-    title: record.title
+    title: record.title,
+    findings: JSON.parse(record.findingsJson || "[]"),
+    sourcesDetail: JSON.parse(record.sourcesJson || "[]")
   };
 };
 
@@ -32,6 +36,8 @@ export const getReportByThreadId = async (
     title: record.title,
     topic: record.topic,
     stats: { sources: record.sources, iterations: record.iterations },
+    findings: JSON.parse(record.findingsJson || "[]"),
+    sourcesDetail: JSON.parse(record.sourcesJson || "[]"),
     createdAt: record.createdAt
   };
 };

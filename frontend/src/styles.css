@@ -97,6 +97,11 @@ textarea {
   gap: 20px;
 }
 
+.report-stack {
+  display: grid;
+  gap: 20px;
+}
+
 /* ── Panels ── */
 
 .panel {
@@ -115,6 +120,100 @@ textarea {
 .report-panel {
   padding: 24px;
   min-height: 70vh;
+}
+
+.insight-panel {
+  padding: 20px 24px;
+}
+
+.compact-header h3 {
+  font-size: 1rem;
+}
+
+.insight-list,
+.source-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.insight-card,
+.source-card {
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(7, 10, 16, 0.76);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.insight-topline,
+.source-header-row,
+.source-metrics {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.confidence-badge,
+.source-status,
+.evidence-count {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(248, 245, 239, 0.7);
+}
+
+.confidence-high {
+  color: #86efac;
+}
+
+.confidence-medium {
+  color: #fcd34d;
+}
+
+.confidence-low,
+.status-failed {
+  color: #fca5a5;
+}
+
+.status-fetched {
+  color: #93c5fd;
+}
+
+.status-skipped {
+  color: #d8b4fe;
+}
+
+.evidence-list {
+  margin: 12px 0 0;
+  padding-left: 18px;
+}
+
+.evidence-list li + li {
+  margin-top: 8px;
+}
+
+.evidence-list span,
+.source-snippet,
+.missing-evidence {
+  display: block;
+  margin-top: 4px;
+  color: rgba(248, 245, 239, 0.68);
+}
+
+.source-domain {
+  display: inline-block;
+  margin-top: 8px;
+  color: #8ec5ff;
+  text-decoration: none;
+}
+
+.source-metrics {
+  margin-top: 12px;
+  color: rgba(248, 245, 239, 0.56);
+  font-size: 0.8rem;
 }
 
 .panel-header h2,

@@ -5,10 +5,11 @@ import { z } from "zod";
 import { buildAnalysisPrompt, buildPlanPrompt, buildQualityCheckPrompt, buildReportPrompt } from "./prompts.ts";
 import { fetchPageText } from "./web-fetch.ts";
 import { sanitizeText, sanitizeSnippet } from "./sanitize.ts";
-import { runSearchQuery, type SearchClient, type SearchResultItem } from "./search.ts";
+import { runSearchQuery, type SearchClient } from "./search.ts";
 import type { ResearchConfig } from "../config/types.ts";
 import { emitProgress, type OnProgress } from "./progress.ts";
 import type { TextGenerationModel } from "../models/factory.ts";
+import type { QualityCheckResult, ResearchAnalysis, ResearchFinding, ResearchSource } from "./types.ts";
 
 export interface ResearchPlan {
   angles: string[];
@@ -20,13 +21,13 @@ export interface ResearchState {
   language: string;
   plan: ResearchPlan | null;
   queries: string[];
-  searchResults: Array<{ query: string; results: SearchResultItem[] }>;
-  sources: SearchResultItem[];
+  searchResults: Array<{ query: string; results: ResearchSource[] }>;
+  sources: ResearchSource[];
+  findings: ResearchFinding[];
   notes: string;
   needsMore: boolean;
   report: string;
   iteration: number;
-  /** Track which source URLs have already been analyzed to avoid re-sending */
   analyzedUrls: string[];
 }
 
@@ -35,8 +36,9 @@ const ResearchStateAnnotation = Annotation.Root({
   language: Annotation<string>,
   plan: Annotation<ResearchPlan | null>,
   queries: Annotation<string[]>,
-  searchResults: Annotation<Array<{ query: string; results: SearchResultItem[] }>>,
-  sources: Annotation<SearchResultItem[]>,
+  searchResults: Annotation<Array<{ query: string; results: ResearchSource[] }>>,
+  sources: Annotation<ResearchSource[]>,
+  findings: Annotation<ResearchFinding[]>,
   notes: Annotation<string>,
   needsMore: Annotation<boolean>,
   report: Annotation<string>,
@@ -49,12 +51,30 @@ const planSchema = z.object({
   queries: z.array(z.string()).min(4)
 });
 
-const qualitySchema = z.object({
-  needsMore: z.boolean(),
-  newQueries: z.array(z.string()).optional().default([])
+const analysisSchema = z.object({
+  summary: z.string(),
+  findings: z.array(z.object({
+    claim: z.string(),
+    confidence: z.enum(["low", "medium", "high"]),
+    evidence: z.array(z.object({
+      sourceId: z.string(),
+      title: z.string(),
+      url: z.string(),
+      summary: z.string()
+    })).min(1),
+    missingEvidence: z.array(z.string()).optional().default([])
+  })).min(1),
+  openQuestions: z.array(z.string()).optional().default([])
 });
 
-const uniqueByUrl = (items: SearchResultItem[]) => {
+const qualitySchema = z.object({
+  needsMore: z.boolean(),
+  newQueries: z.array(z.string()).optional().default([]),
+  uncoveredAngles: z.array(z.string()).optional().default([]),
+  weakClaims: z.array(z.string()).optional().default([])
+});
+
+const uniqueByUrl = (items: ResearchSource[]) => {
   const seen = new Set<string>();
   return items.filter((item) => {
     if (!item.url || seen.has(item.url)) {
@@ -65,32 +85,51 @@ const uniqueByUrl = (items: SearchResultItem[]) => {
   });
 };
 
-const uniqueStrings = (items: string[]) =>
-  Array.from(new Set(items.filter(Boolean)));
+const uniqueStrings = (items: string[]) => Array.from(new Set(items.filter(Boolean)));
 
-/**
- * Serialize sources for LLM consumption.
- * Content and snippets are sanitized to reduce noise and avoid content-safety triggers.
- */
-const serializeSources = (sources: SearchResultItem[]) =>
+const scoreSource = (source: ResearchSource): ResearchSource => {
+  const authority = /(github\.com|docs\.|developer\.|openai\.com|anthropic\.com|mozilla\.org|wikipedia\.org)$/.test(source.domain)
+    ? 0.9
+    : source.domain
+      ? 0.5
+      : 0.2;
+  const relevance = Math.min(1, Math.max(0.2, (source.content || source.snippet).length / 1500));
+  const completeness = source.content ? 1 : source.snippet ? 0.4 : 0.1;
+  return {
+    ...source,
+    score: {
+      authority,
+      relevance,
+      completeness,
+      total: Number(((authority * 0.4) + (relevance * 0.35) + (completeness * 0.25)).toFixed(3))
+    }
+  };
+};
+
+const serializeSources = (sources: ResearchSource[]) =>
   sources
     .map((item) => {
       const snippet = sanitizeSnippet(item.snippet, 400);
       const content = item.content ? sanitizeText(item.content, 4000) : "";
-      return `标题：${item.title}\nURL：${item.url}\n摘要：${snippet}${content ? `\n正文：${content}` : ""}`;
+      return `sourceId：${item.id}\n标题：${item.title}\nURL：${item.url}\n域名：${item.domain}\n摘要：${snippet}${content ? `\n正文：${content}` : ""}`;
     })
     .join("\n\n");
 
-/**
- * Build a lightweight source index (title + URL only) for the report step.
- */
-const buildSourceIndex = (sources: SearchResultItem[]) =>
+const buildSourceIndex = (sources: ResearchSource[]) =>
   sources
-    .map((item, i) => `[${i + 1}] ${item.title} — ${item.url}`)
+    .map((item, i) => `- [S${i + 1}] [${item.title}](${item.url})`)
     .join("\n");
 
-const serializePlan = (plan: ResearchPlan) =>
-  plan.angles.map((angle) => `- ${angle}`).join("\n");
+const serializeFindings = (findings: ResearchFinding[]) =>
+  findings
+    .map((finding) => {
+      const refs = finding.evidence.map((evidence: ResearchFinding["evidence"][number]) => `[${evidence.sourceId}]`).join(" ");
+      const gaps = finding.missingEvidence?.length ? `\n证据缺口：${finding.missingEvidence.join("；")}` : "";
+      return `- 结论：${finding.claim} ${refs}\n  置信度：${finding.confidence}${gaps}`;
+    })
+    .join("\n");
+
+const serializePlan = (plan: ResearchPlan) => plan.angles.map((angle) => `- ${angle}`).join("\n");
 
 const buildFastQueries = (topic: string, language: string) =>
   uniqueStrings([
@@ -101,52 +140,28 @@ const buildFastQueries = (topic: string, language: string) =>
     language.startsWith("zh") ? `${topic} 核心架构` : `${topic} key architecture`
   ]).slice(0, 3);
 
-const routeAfterSearch = (config: ResearchConfig) => () =>
-  config.fetchMaxPages > 0 ? "fetch_step" : "analyze_step";
+const routeAfterSearch = (config: ResearchConfig) => () => config.fetchMaxPages > 0 ? "fetch_step" : "analyze_step";
+const routeAfterAnalyze = (config: ResearchConfig) => () => config.maxIterations >= 1 ? "quality_step" : "report_step";
+const routeAfterQuality = (state: typeof ResearchStateAnnotation.State) => state.needsMore ? "search_step" : "report_step";
 
-const routeAfterAnalyze = (config: ResearchConfig) => () =>
-  config.maxIterations >= 1 ? "quality_step" : "report_step";
-
-const routeAfterQuality = (state: typeof ResearchStateAnnotation.State) =>
-  state.needsMore ? "search_step" : "report_step";
-
-/**
- * Cap the number of sources sent to LLM to avoid blowing up context.
- */
-const selectTopSources = (sources: SearchResultItem[], maxCount: number): SearchResultItem[] => {
-  if (sources.length <= maxCount) return sources;
-  const withContent = sources.filter((s) => s.content);
-  const withoutContent = sources.filter((s) => !s.content);
-  const selected = [...withContent.slice(0, maxCount)];
-  if (selected.length < maxCount) {
-    selected.push(...withoutContent.slice(0, maxCount - selected.length));
-  }
-  return selected;
+const selectTopSources = (sources: ResearchSource[], maxCount: number): ResearchSource[] => {
+  const scored = sources.map(scoreSource).sort((a, b) => b.score.total - a.score.total);
+  return scored.slice(0, maxCount);
 };
 
-/** Max sources to send per analyze call */
 const ANALYZE_MAX_SOURCES = 15;
 
-/**
- * Safely invoke the LLM with content-safety error handling.
- * - Content-safety rejections (400 "high risk") → throw descriptive error (not retryable)
- * - Rate limits (429) / transient errors (5xx) → retry with backoff
- * - Other errors → throw immediately
- */
 const safeModelInvoke = async (
   model: TextGenerationModel,
   prompt: string,
   options: { retries?: number; label?: string } = {}
 ): Promise<{ content: string | unknown }> => {
   const { retries = 2, label = "LLM" } = options;
-
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       return await model.invoke(prompt);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-
-      // Content-safety rejection — not retryable
       if (
         message.includes("high risk") ||
         message.includes("content_filter") ||
@@ -154,13 +169,9 @@ const safeModelInvoke = async (
         (message.includes("400") && message.toLowerCase().includes("risk"))
       ) {
         throw new Error(
-          `[${label}] 内容安全拦截：请求被 LLM API 拒绝。` +
-          `可能是研究主题或抓取的网页内容触发了风控策略。` +
-          `建议：调整研究主题描述，或检查来源内容。`
+          `[${label}] 内容安全拦截：请求被 LLM API 拒绝。可能是研究主题或抓取的网页内容触发了风控策略。建议：调整研究主题描述，或检查来源内容。`
         );
       }
-
-      // Retryable errors: rate limit, server errors, timeouts
       const isRetryable =
         message.includes("429") ||
         message.includes("rate") ||
@@ -169,17 +180,14 @@ const safeModelInvoke = async (
         message.includes("timeout") ||
         message.includes("ECONNRESET") ||
         message.includes("ETIMEDOUT");
-
       if (isRetryable && attempt < retries) {
         const delay = 1000 * (attempt + 1) + Math.random() * 500;
         await new Promise((r) => setTimeout(r, delay));
         continue;
       }
-
       throw err;
     }
   }
-
   throw new Error("Unreachable");
 };
 
@@ -198,33 +206,33 @@ export const buildResearchGraph = ({
   const qualityParser = StructuredOutputParser.fromZodSchema(qualitySchema);
 
   const extractTextContent = (value: unknown): string => {
-    if (typeof value === "string") {
-      return value;
-    }
-    if (Array.isArray(value)) {
-      return value.map((item) => extractTextContent(item)).join("");
-    }
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) return value.map((item) => extractTextContent(item)).join("");
     if (value && typeof value === "object") {
       const candidate = value as Record<string, unknown>;
-      if (typeof candidate.text === "string") {
-        return candidate.text;
-      }
-      if (typeof candidate.content === "string") {
-        return candidate.content;
-      }
-      if (candidate.content !== undefined) {
-        return extractTextContent(candidate.content);
-      }
+      if (typeof candidate.text === "string") return candidate.text;
+      if (typeof candidate.content === "string") return candidate.content;
+      if (candidate.content !== undefined) return extractTextContent(candidate.content);
     }
     return "";
   };
 
+  const parseJsonObject = <T>(raw: string, fallback: T): T => {
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      const match = raw.match(/\{[\s\S]*\}/);
+      if (!match) return fallback;
+      try {
+        return JSON.parse(match[0]) as T;
+      } catch {
+        return fallback;
+      }
+    }
+  };
+
   const planNode = async (state: ResearchState) => {
-    emitProgress(onProgress, {
-      type: "step_start",
-      step: "plan",
-      message: "正在规划研究角度与搜索查询..."
-    });
+    emitProgress(onProgress, { type: "step_start", step: "plan", message: "正在规划研究角度与搜索查询..." });
     const prompt = buildPlanPrompt({
       topic: state.topic,
       language: state.language,
@@ -238,11 +246,7 @@ export const buildResearchGraph = ({
       message: `规划完成：${plan.angles.length} 个研究角度，${plan.queries.length} 条搜索查询`,
       data: { angles: plan.angles, queryCount: plan.queries.length }
     });
-    return {
-      plan,
-      queries: plan.queries,
-      iteration: state.iteration
-    };
+    return { plan, queries: plan.queries, iteration: state.iteration };
   };
 
   const searchNode = async (state: ResearchState) => {
@@ -265,35 +269,27 @@ export const buildResearchGraph = ({
           message: `搜索进度 (${completed}/${total})：${query.slice(0, 40)}`,
           progress: { current: completed, total }
         });
-        return { query, results };
+        return {
+          query,
+          results: results.map((result) => ({ ...result, query }))
+        };
       })
     );
     const searchResults = await Promise.all(tasks);
-    const flattened = searchResults.flatMap((item) =>
-      item.results.map((result) => ({
-        ...result,
-        query: item.query
-      }))
-    );
-    const sources = uniqueByUrl([...(state.sources || []), ...flattened]);
+    const flattened = searchResults.flatMap((item) => item.results);
+    const sources = uniqueByUrl([...(state.sources || []), ...flattened]).map(scoreSource);
     emitProgress(onProgress, {
       type: "step_complete",
       step: "search",
       message: `搜索完成：共获取 ${sources.length} 条去重来源`,
       progress: { current: total, total }
     });
-    return {
-      searchResults,
-      sources,
-      iteration: state.iteration
-    };
+    return { searchResults, sources, iteration: state.iteration };
   };
 
   const fetchNode = async (state: ResearchState) => {
     const uniqueSources = uniqueByUrl(state.sources || []);
-    const toFetch = uniqueSources
-      .filter((item) => !item.content)
-      .slice(0, config.fetchMaxPages);
+    const toFetch = uniqueSources.filter((item) => !item.content).slice(0, config.fetchMaxPages);
     const total = toFetch.length;
     emitProgress(onProgress, {
       type: "step_start",
@@ -306,7 +302,7 @@ export const buildResearchGraph = ({
     const fetched = await Promise.all(
       toFetch.map((item) =>
         limit(async () => {
-          const content = await fetchPageText(item.url, config.requestTimeoutMs);
+          const fetchedPage = await fetchPageText(item.url, config.requestTimeoutMs);
           completed++;
           emitProgress(onProgress, {
             type: "source_fetched",
@@ -314,20 +310,26 @@ export const buildResearchGraph = ({
             message: `抓取进度 (${completed}/${total})：${item.title?.slice(0, 30) || item.url}`,
             progress: { current: completed, total }
           });
-          return { ...item, content };
+          return scoreSource({
+            ...item,
+            content: fetchedPage.content || item.content,
+            contentType: fetchedPage.contentType,
+            finalUrl: fetchedPage.finalUrl,
+            fetchStatus: fetchedPage.fetchStatus,
+            extractionMethod: fetchedPage.extractionMethod,
+            fetchedAt: fetchedPage.fetchedAt
+          });
         })
       )
     );
     emitProgress(onProgress, {
       type: "step_complete",
       step: "fetch",
-      message: `抓取完成：成功获取 ${fetched.filter((item) => item.content).length}/${total} 个页面正文`,
+      message: `抓取完成：成功获取 ${fetched.filter((item) => item.fetchStatus === "fetched").length}/${total} 个页面正文`,
       progress: { current: total, total }
     });
     return {
-      sources: uniqueByUrl(
-        uniqueSources.map((item) => fetched.find((candidate) => candidate.url === item.url) || item)
-      ),
+      sources: uniqueByUrl(uniqueSources.map((item) => fetched.find((candidate) => candidate.url === item.url) || item)).map(scoreSource),
       iteration: state.iteration
     };
   };
@@ -336,22 +338,17 @@ export const buildResearchGraph = ({
     const allSources = state.sources || [];
     const analyzedSet = new Set(state.analyzedUrls || []);
     const isFirstRound = analyzedSet.size === 0;
-
-    const candidateSources = isFirstRound
-      ? allSources
-      : allSources.filter((s) => !analyzedSet.has(s.url));
-
+    const candidateSources = isFirstRound ? allSources : allSources.filter((s) => !analyzedSet.has(s.url));
     const toAnalyze = selectTopSources(candidateSources, ANALYZE_MAX_SOURCES);
-
     emitProgress(onProgress, {
       type: "step_start",
       step: "analyze",
-      message: `正在分析 ${toAnalyze.length} 条${isFirstRound ? "" : "新增"}来源并整理研究笔记...`
+      message: `正在分析 ${toAnalyze.length} 条${isFirstRound ? "" : "新增"}来源并整理研究发现...`
     });
-
     if (toAnalyze.length === 0) {
       return {
         notes: state.notes,
+        findings: state.findings,
         analyzedUrls: [...analyzedSet],
         iteration: state.iteration
       };
@@ -363,23 +360,27 @@ export const buildResearchGraph = ({
       sources: serializeSources(toAnalyze)
     });
     const response = await safeModelInvoke(model, prompt, { label: "analyze" });
-
-    const mergedNotes = state.notes
-      ? `${state.notes}\n\n${isFirstRound ? "--- 研究分析 ---" : "--- 补充研究 ---"}\n${extractTextContent(response.content)}`
-      : extractTextContent(response.content);
-
-    const newAnalyzedUrls = [
-      ...analyzedSet,
-      ...toAnalyze.map((s) => s.url)
-    ];
-
+    const parsed = parseJsonObject<ResearchAnalysis>(extractTextContent(response.content), {
+      summary: "",
+      findings: [],
+      openQuestions: []
+    });
+    const analysis = analysisSchema.parse(parsed);
+    const mergedNotes = [state.notes, analysis.summary, analysis.findings.map((finding) => {
+      const refs = finding.evidence.map((evidence: ResearchFinding["evidence"][number]) => `[${evidence.sourceId}]`).join(" ");
+      return `- ${finding.claim} ${refs}（${finding.confidence}）`;
+    }).join("\n"), analysis.openQuestions.length ? `待补充问题：${analysis.openQuestions.join("；")}` : ""]
+      .filter(Boolean)
+      .join("\n\n");
+    const newAnalyzedUrls = [...analyzedSet, ...toAnalyze.map((s) => s.url)];
     emitProgress(onProgress, {
       type: "step_complete",
       step: "analyze",
-      message: "分析完成：研究笔记已整理"
+      message: `分析完成：整理出 ${analysis.findings.length} 条研究发现`
     });
     return {
       notes: mergedNotes,
+      findings: [...(state.findings || []), ...analysis.findings],
       analyzedUrls: newAnalyzedUrls,
       iteration: state.iteration
     };
@@ -394,29 +395,35 @@ export const buildResearchGraph = ({
     const prompt = buildQualityCheckPrompt({
       topic: state.topic,
       language: state.language,
-      notes: state.notes,
+      notes: `${state.notes}\n\n结构化发现：\n${serializeFindings(state.findings || [])}`,
       iteration: state.iteration,
       maxIterations: config.maxIterations,
       sourceCount: (state.sources || []).length,
       formatInstructions: qualityParser.getFormatInstructions()
     });
     const response = await safeModelInvoke(model, prompt, { label: "quality" });
-
-    let parsed: { needsMore: boolean; newQueries: string[] };
+    let parsed: QualityCheckResult;
     try {
       parsed = await qualityParser.parse(extractTextContent(response.content));
     } catch {
-      // JSON parse failure — safe fallback: stop iterating
-      parsed = { needsMore: false, newQueries: [] };
+      parsed = {
+        needsMore: (state.sources || []).length < 3 || (state.findings || []).length < 3,
+        newQueries: [],
+        uncoveredAngles: [],
+        weakClaims: (state.findings || []).filter((finding) => finding.confidence === "low").map((finding) => finding.claim)
+      };
     }
-
-    const needsMore = parsed.needsMore && state.iteration < config.maxIterations;
+    const needsMore = Boolean(parsed.needsMore) && state.iteration < config.maxIterations;
     if (needsMore) {
       emitProgress(onProgress, {
         type: "iteration",
         step: "quality",
-        message: `质量检查：信息不足，将补充搜索 ${(parsed.newQueries || []).length} 条新查询（进入第 ${state.iteration + 2} 轮）`,
-        data: { newQueries: parsed.newQueries }
+        message: `质量检查：发现 ${parsed.weakClaims.length} 条弱结论、${parsed.uncoveredAngles.length} 个缺失角度，将继续补充搜索`,
+        data: {
+          newQueries: parsed.newQueries,
+          uncoveredAngles: parsed.uncoveredAngles,
+          weakClaims: parsed.weakClaims
+        }
       });
     } else {
       emitProgress(onProgress, {
@@ -436,37 +443,30 @@ export const buildResearchGraph = ({
     emitProgress(onProgress, {
       type: "step_start",
       step: "report",
-      message: `正在基于研究笔记生成报告...`
+      message: "正在基于研究发现生成报告..."
     });
     const prompt = buildReportPrompt({
       topic: state.topic,
       language: state.language,
       plan: state.plan ? serializePlan(state.plan) : "",
-      notes: state.notes,
+      notes: `${state.notes}\n\n结构化发现：\n${serializeFindings(state.findings || [])}`,
       sourceList: buildSourceIndex(state.sources || [])
     });
     let report = "";
-
     if (typeof model.stream === "function") {
       const stream = await model.stream(prompt);
       for await (const chunk of stream) {
         const text = extractTextContent(chunk);
-        if (!text) {
-          continue;
-        }
+        if (!text) continue;
         report += text;
         emitProgress(onProgress, {
           type: "report_chunk",
           step: "report",
-          message: `正在生成报告正文...`,
-          data: {
-            chunk: text,
-            totalLength: report.length
-          }
+          message: "正在生成报告正文...",
+          data: { chunk: text, totalLength: report.length }
         });
       }
     }
-
     if (!report) {
       const response = await safeModelInvoke(model, prompt, { label: "report" });
       report = extractTextContent(response.content);
@@ -474,22 +474,11 @@ export const buildResearchGraph = ({
         type: "report_chunk",
         step: "report",
         message: "正在生成报告正文...",
-        data: {
-          chunk: report,
-          totalLength: report.length
-        }
+        data: { chunk: report, totalLength: report.length }
       });
     }
-
-    emitProgress(onProgress, {
-      type: "step_complete",
-      step: "report",
-      message: "报告生成完成"
-    });
-    return {
-      report,
-      iteration: state.iteration
-    };
+    emitProgress(onProgress, { type: "step_complete", step: "report", message: "报告生成完成" });
+    return { report, iteration: state.iteration };
   };
 
   const bootstrapNode = async (state: ResearchState) => {
@@ -502,10 +491,7 @@ export const buildResearchGraph = ({
         data: { angles: ["概览", "架构", "流程"], queryCount: queries.length }
       });
       return {
-        plan: {
-          angles: ["概览", "架构", "流程"],
-          queries
-        },
+        plan: { angles: ["概览", "架构", "流程"], queries },
         queries
       };
     }
