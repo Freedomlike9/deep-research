@@ -30,6 +30,21 @@
     },
     "consulting-analysis": {
       "enabled": true
+    },
+    "query-planner": {
+      "enabled": true
+    },
+    "source-triangulation": {
+      "enabled": true
+    },
+    "counter-evidence": {
+      "enabled": true
+    },
+    "citation-auditor": {
+      "enabled": true
+    },
+    "report-structuring": {
+      "enabled": true
     }
   }
 }

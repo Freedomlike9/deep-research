@@ -78,6 +78,21 @@ export const selectRelevantSkills = ({
     if (skill.name === "topic-briefing" && /(brief|kickoff|outline|提纲|梳理|简报|启动|方向)/i.test(normalizedTopic)) {
       return true;
     }
+    if (skill.name === "query-planner" && /(research|研究|analy|analysis|overview|compare|comparison|架构|技术|调研|评估|策略)/i.test(normalizedTopic)) {
+      return true;
+    }
+    if (skill.name === "source-triangulation" && /(research|研究|analysis|report|竞争|对比|评估|结论|证据|evidence)/i.test(normalizedTopic)) {
+      return true;
+    }
+    if (skill.name === "counter-evidence" && /(risk|risks|tradeoff|tradeoffs|limitation|limitations|criticism|controversy|风险|局限|争议|对比|评估|选型)/i.test(normalizedTopic)) {
+      return true;
+    }
+    if (skill.name === "citation-auditor" && /(report|研究|research|analysis|总结|citation|引用|证据|evidence)/i.test(normalizedTopic)) {
+      return true;
+    }
+    if (skill.name === "report-structuring" && /(report|brief|总结|报告|汇报|analysis|research|输出|writeup)/i.test(normalizedTopic)) {
+      return true;
+    }
     if (skill.name === "deep-research" && /(research|研究|分析|总结|overview|架构)/i.test(normalizedTopic)) {
       return true;
     }
