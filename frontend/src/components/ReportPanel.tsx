@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { ProgressEvent } from "../lib/api";
 
 interface ReportPanelProps {
@@ -14,6 +15,7 @@ interface ReportPanelProps {
     total: number;
   };
   isTyping?: boolean;
+  actions?: ReactNode;
 }
 
 const formatEventTime = (timestamp: number) =>
@@ -33,7 +35,8 @@ export const ReportPanel = ({
   activeStepLabel,
   activeMessage,
   activeProgress,
-  isTyping
+  isTyping,
+  actions
 }: ReportPanelProps) => {
   const renderInline = (text: string) => {
     const escapeHtml = (value: string) =>
@@ -313,12 +316,15 @@ export const ReportPanel = ({
           <h2>{title || "Research Result"}</h2>
         </div>
 
-        {stats && (
-          <div className="report-stats">
-            <span className="stat-chip">{stats.sources} sources</span>
-            <span className="stat-chip">{stats.iterations} iterations</span>
-          </div>
-        )}
+        <div className="report-panel-side">
+          {stats && (
+            <div className="report-stats">
+              <span className="stat-chip">{stats.sources} sources</span>
+              <span className="stat-chip">{stats.iterations} iterations</span>
+            </div>
+          )}
+          {actions ? <div className="report-panel-actions">{actions}</div> : null}
+        </div>
       </div>
 
       {error ? <div className="error-box">{error}</div> : null}

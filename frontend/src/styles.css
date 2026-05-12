@@ -95,11 +95,13 @@ textarea {
   display: grid;
   grid-template-columns: 340px minmax(0, 1fr);
   gap: 20px;
+  min-width: 0;
 }
 
 .report-stack {
   display: grid;
   gap: 20px;
+  min-width: 0;
 }
 
 /* ── Panels ── */
@@ -120,6 +122,7 @@ textarea {
 .report-panel {
   padding: 24px;
   min-height: 70vh;
+  min-width: 0;
 }
 
 .insight-panel {
@@ -214,6 +217,87 @@ textarea {
   margin-top: 12px;
   color: rgba(248, 245, 239, 0.56);
   font-size: 0.8rem;
+}
+
+.drawer-toggle-button,
+.drawer-close-button {
+  border: 1px solid rgba(246, 197, 137, 0.28);
+  border-radius: 999px;
+  padding: 10px 14px;
+  background: rgba(246, 197, 137, 0.08);
+  color: #f6c589;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.drawer-toggle-button:hover,
+.drawer-close-button:hover {
+  background: rgba(246, 197, 137, 0.16);
+}
+
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: rgba(8, 10, 16, 0.18);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+  z-index: 12;
+}
+
+.drawer-backdrop.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.insight-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: min(420px, 100vw);
+  height: 100vh;
+  padding: 24px 18px 20px;
+  background: rgba(17, 24, 39, 0.96);
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: -18px 0 50px rgba(0, 0, 0, 0.32);
+  transform: translateX(100%);
+  transition: transform 0.24s ease;
+  z-index: 13;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.insight-drawer.open {
+  transform: translateX(0);
+}
+
+.insight-drawer-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.insight-drawer-header h3 {
+  margin: 6px 0 0;
+}
+
+.insight-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 4px;
+  display: grid;
+  gap: 16px;
+}
+
+.insight-drawer .insight-panel {
+  padding: 18px;
+  background: rgba(7, 10, 16, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 24px;
 }
 
 .panel-header h2,
@@ -329,9 +413,26 @@ textarea {
   flex-wrap: wrap;
 }
 
+.report-panel-side {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.report-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .report-stats {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .stat-chip {
@@ -352,6 +453,8 @@ textarea {
   border-radius: 22px;
   background: rgba(7, 10, 16, 0.76);
   overflow: auto;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   line-height: 1.7;
   border: 1px solid rgba(255, 255, 255, 0.06);
 }
@@ -376,6 +479,7 @@ textarea {
 
 .report-markdown {
   color: rgba(248, 245, 239, 0.96);
+  min-width: 0;
 }
 
 .report-markdown > :first-child {
@@ -420,6 +524,16 @@ textarea {
 .report-markdown pre,
 .report-markdown table {
   margin: 0.85em 0;
+  max-width: 100%;
+}
+
+.report-markdown p,
+.report-markdown li,
+.report-markdown blockquote,
+.report-markdown td,
+.report-markdown th {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .report-markdown ul,
@@ -435,6 +549,7 @@ textarea {
   color: #8ec5ff;
   text-decoration: none;
   border-bottom: 1px solid rgba(142, 197, 255, 0.35);
+  overflow-wrap: anywhere;
 }
 
 .report-markdown a:hover {
@@ -505,6 +620,7 @@ textarea {
 
 .md-table-wrap {
   overflow-x: auto;
+  max-width: 100%;
   border-radius: 18px;
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
@@ -800,5 +916,35 @@ textarea {
 @media (max-width: 980px) {
   .workspace-grid {
     grid-template-columns: 1fr;
+  }
+
+  .app-shell {
+    padding: 32px 16px 24px;
+  }
+
+  .report-content {
+    padding: 18px;
+  }
+
+  .insight-drawer {
+    width: 100vw;
+    padding: 18px 14px 16px;
+  }
+}
+
+@media (max-width: 640px) {
+  .report-panel-top {
+    align-items: flex-start;
+  }
+
+  .report-panel-side {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .drawer-toggle-button,
+  .drawer-close-button {
+    padding: 9px 12px;
+    font-size: 0.88rem;
   }
 }

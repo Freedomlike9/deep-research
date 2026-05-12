@@ -1,9 +1,9 @@
 import { startTransition, useEffect, useRef, useState } from "react";
 import { ControlPanel } from "./components/ControlPanel";
-import { FindingsPanel } from "./components/FindingsPanel";
 import { ReportPanel } from "./components/ReportPanel";
-import { SourcePanel } from "./components/SourcePanel";
 import { WorkspaceHeader } from "./components/WorkspaceHeader";
+import { FindingsPanel } from "./components/FindingsPanel";
+import { SourcePanel } from "./components/SourcePanel";
 import {
   api,
   type HistoryRecord,
@@ -48,6 +48,7 @@ export const App = () => {
   const [selectedThreadId, setSelectedThreadId] = useState<string>();
   const [findings, setFindings] = useState<ResearchFinding[]>([]);
   const [sourcesDetail, setSourcesDetail] = useState<ResearchSource[]>([]);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const visibleReportRef = useRef("");
   const pendingReportRef = useRef("");
   const streamedReportRef = useRef("");
@@ -144,6 +145,7 @@ export const App = () => {
         setStats(undefined);
         setFindings([]);
         setSourcesDetail([]);
+        setDrawerOpen(false);
       }
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : String(deleteError));
@@ -186,6 +188,7 @@ export const App = () => {
     setStats(undefined);
     setFindings([]);
     setSourcesDetail([]);
+    setDrawerOpen(false);
     setProgressEvents([]);
     setActiveStep(undefined);
     setActiveMessage("Connecting to the research stream...");
@@ -285,11 +288,37 @@ export const App = () => {
             activeStepLabel={activeStep ? STEP_LABELS[activeStep] : undefined}
             activeMessage={activeMessage}
             activeProgress={activeProgress}
+            actions={
+              (findings.length || sourcesDetail.length) ? (
+                <button type="button" className="drawer-toggle-button" onClick={() => setDrawerOpen(true)}>
+                  Open Findings & Sources
+                </button>
+              ) : undefined
+            }
           />
+        </div>
+      </div>
+      <button
+        type="button"
+        className={`drawer-backdrop ${drawerOpen ? "open" : ""}`}
+        aria-label="Close support drawer"
+        onClick={() => setDrawerOpen(false)}
+      />
+      <aside className={`insight-drawer ${drawerOpen ? "open" : ""}`} aria-hidden={!drawerOpen}>
+        <div className="insight-drawer-header">
+          <div>
+            <span className="meta-label">Research Support</span>
+            <h3>Findings & Sources</h3>
+          </div>
+          <button type="button" className="drawer-close-button" onClick={() => setDrawerOpen(false)}>
+            Close
+          </button>
+        </div>
+        <div className="insight-drawer-body">
           <FindingsPanel findings={findings} />
           <SourcePanel sources={sourcesDetail} />
         </div>
-      </div>
+      </aside>
     </main>
   );
 };

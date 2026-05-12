@@ -151,7 +151,7 @@ const buildSourceIndex = (sources: ResearchSource[]) =>
     .map((item, i) => `- [S${i + 1}] [${item.title}](${item.finalUrl || item.url})`)
     .join("\n");
 
-const serializeFindings = (findings: ResearchFinding[], citationByUrl: Map<string, string>) =>
+const serializeFindings = (findings: ResearchFinding[], citationByUrl: Map<string, string> = new Map()) =>
   findings
     .map((finding) => {
       const refs = finding.evidence
@@ -427,10 +427,11 @@ export const buildResearchGraph = ({
       step: "quality",
       message: `正在检查研究完整性（第 ${state.iteration + 1} 轮）...`
     });
+    const { citationByUrl } = buildCitationRegistry(state.sources || [], state.findings || []);
     const prompt = buildQualityCheckPrompt({
       topic: state.topic,
       language: state.language,
-      notes: `${state.notes}\n\n结构化发现：\n${serializeFindings(state.findings || [])}`,
+      notes: `${state.notes}\n\n结构化发现：\n${serializeFindings(state.findings || [], citationByUrl)}`,
       iteration: state.iteration,
       maxIterations: config.maxIterations,
       sourceCount: (state.sources || []).length,
