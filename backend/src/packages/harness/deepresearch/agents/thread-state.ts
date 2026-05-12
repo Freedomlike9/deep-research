@@ -4,7 +4,7 @@ export interface ThreadDataState {
   outputsPath?: string;
 }
 
-import type { ResearchFinding, ResearchSource } from "../research/types.ts";
+import type { ResearchFinding, ResearchSource, ResearchQueryPlan } from "../research/types.ts";
 
 export interface ThreadState {
   threadId: string;
@@ -20,10 +20,7 @@ export interface ThreadState {
     githubRepo?: { owner: string; repo: string } | null;
   };
   threadData?: ThreadDataState;
-  plan?: {
-    angles: string[];
-    queries: string[];
-  } | null;
+  plan?: ResearchQueryPlan | null;
   queries: string[];
   searchResults: Array<{
     query: string;
@@ -35,6 +32,7 @@ export interface ThreadState {
   needsMore: boolean;
   report: string;
   iteration: number;
+  analyzedUrls: string[];
 }
 
 export const createInitialThreadState = ({
@@ -65,5 +63,6 @@ export const createInitialThreadState = ({
   needsMore: false,
   report: "",
   iteration: 0,
+  analyzedUrls: [],
   plan: null
 });

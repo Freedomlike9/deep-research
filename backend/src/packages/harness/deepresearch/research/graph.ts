@@ -9,32 +9,14 @@ import { runSearchQuery, type SearchClient } from "./search.ts";
 import type { ResearchConfig } from "../config/types.ts";
 import { emitProgress, type OnProgress } from "./progress.ts";
 import type { TextGenerationModel } from "../models/factory.ts";
-import type { QualityCheckResult, ResearchAnalysis, ResearchFinding, ResearchSource } from "./types.ts";
+import type { QualityCheckResult, ResearchAnalysis, ResearchFinding, ResearchQueryPlan, ResearchSource, ResearchWorkingState } from "./types.ts";
 
-export interface ResearchPlan {
-  angles: string[];
-  queries: string[];
-}
-
-export interface ResearchState {
-  topic: string;
-  language: string;
-  plan: ResearchPlan | null;
-  queries: string[];
-  searchResults: Array<{ query: string; results: ResearchSource[] }>;
-  sources: ResearchSource[];
-  findings: ResearchFinding[];
-  notes: string;
-  needsMore: boolean;
-  report: string;
-  iteration: number;
-  analyzedUrls: string[];
-}
+export interface ResearchState extends ResearchWorkingState {}
 
 const ResearchStateAnnotation = Annotation.Root({
   topic: Annotation<string>,
   language: Annotation<string>,
-  plan: Annotation<ResearchPlan | null>,
+  plan: Annotation<ResearchQueryPlan | null>,
   queries: Annotation<string[]>,
   searchResults: Annotation<Array<{ query: string; results: ResearchSource[] }>>,
   sources: Annotation<ResearchSource[]>,
@@ -74,13 +56,16 @@ const qualitySchema = z.object({
   weakClaims: z.array(z.string()).optional().default([])
 });
 
+const getSourceIdentity = (item: ResearchSource) => item.finalUrl || item.url;
+
 const uniqueByUrl = (items: ResearchSource[]) => {
   const seen = new Set<string>();
   return items.filter((item) => {
-    if (!item.url || seen.has(item.url)) {
+    const identity = getSourceIdentity(item);
+    if (!identity || seen.has(identity)) {
       return false;
     }
-    seen.add(item.url);
+    seen.add(identity);
     return true;
   });
 };
@@ -115,21 +100,71 @@ const serializeSources = (sources: ResearchSource[]) =>
     })
     .join("\n\n");
 
+const buildCitationRegistry = (sources: ResearchSource[], findings: ResearchFinding[]) => {
+  const sourceByKey = new Map<string, ResearchSource>();
+  const register = (source: ResearchSource) => {
+    sourceByKey.set(getSourceIdentity(source), source);
+    sourceByKey.set(source.url, source);
+  };
+
+  for (const source of sources) {
+    register(source);
+  }
+
+  const orderedSources: ResearchSource[] = [];
+  const seen = new Set<string>();
+  const push = (source?: ResearchSource) => {
+    if (!source) return;
+    const key = getSourceIdentity(source);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    orderedSources.push(source);
+  };
+
+  for (const finding of findings) {
+    for (const evidence of finding.evidence) {
+      push(sourceByKey.get(evidence.url));
+    }
+  }
+
+  for (const source of sources) {
+    push(source);
+  }
+
+  const citationByUrl = new Map<string, string>();
+  orderedSources.forEach((source, index) => {
+    const citationId = `S${index + 1}`;
+    citationByUrl.set(source.url, citationId);
+    if (source.finalUrl) {
+      citationByUrl.set(source.finalUrl, citationId);
+    }
+  });
+
+  return {
+    orderedSources,
+    citationByUrl
+  };
+};
+
 const buildSourceIndex = (sources: ResearchSource[]) =>
   sources
-    .map((item, i) => `- [S${i + 1}] [${item.title}](${item.url})`)
+    .map((item, i) => `- [S${i + 1}] [${item.title}](${item.finalUrl || item.url})`)
     .join("\n");
 
-const serializeFindings = (findings: ResearchFinding[]) =>
+const serializeFindings = (findings: ResearchFinding[], citationByUrl: Map<string, string>) =>
   findings
     .map((finding) => {
-      const refs = finding.evidence.map((evidence: ResearchFinding["evidence"][number]) => `[${evidence.sourceId}]`).join(" ");
+      const refs = finding.evidence
+        .map((evidence: ResearchFinding["evidence"][number]) => citationByUrl.get(evidence.url) || evidence.citationId)
+        .filter(Boolean)
+        .map((citationId) => `[${citationId}]`)
+        .join(" ");
       const gaps = finding.missingEvidence?.length ? `\n证据缺口：${finding.missingEvidence.join("；")}` : "";
-      return `- 结论：${finding.claim} ${refs}\n  置信度：${finding.confidence}${gaps}`;
+      return `- 结论：${finding.claim}${refs ? ` ${refs}` : ""}\n  置信度：${finding.confidence}${gaps}`;
     })
     .join("\n");
 
-const serializePlan = (plan: ResearchPlan) => plan.angles.map((angle) => `- ${angle}`).join("\n");
+const serializePlan = (plan: ResearchQueryPlan) => plan.angles.map((angle) => `- ${angle}`).join("\n");
 
 const buildFastQueries = (topic: string, language: string) =>
   uniqueStrings([
@@ -445,12 +480,20 @@ export const buildResearchGraph = ({
       step: "report",
       message: "正在基于研究发现生成报告..."
     });
+    const { orderedSources, citationByUrl } = buildCitationRegistry(state.sources || [], state.findings || []);
+    const normalizedFindings = (state.findings || []).map((finding) => ({
+      ...finding,
+      evidence: finding.evidence.map((evidence) => ({
+        ...evidence,
+        citationId: citationByUrl.get(evidence.url) || evidence.citationId
+      }))
+    }));
     const prompt = buildReportPrompt({
       topic: state.topic,
       language: state.language,
       plan: state.plan ? serializePlan(state.plan) : "",
-      notes: `${state.notes}\n\n结构化发现：\n${serializeFindings(state.findings || [])}`,
-      sourceList: buildSourceIndex(state.sources || [])
+      notes: `${state.notes}\n\n结构化发现：\n${serializeFindings(normalizedFindings, citationByUrl)}`,
+      sourceList: buildSourceIndex(orderedSources)
     });
     let report = "";
     if (typeof model.stream === "function") {

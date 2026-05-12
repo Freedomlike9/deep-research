@@ -155,7 +155,7 @@ export class LeadResearchAgent {
       needsMore: state.needsMore,
       report: state.report,
       iteration: state.iteration,
-      analyzedUrls: []
+      analyzedUrls: state.analyzedUrls
     });
 
     state = {
